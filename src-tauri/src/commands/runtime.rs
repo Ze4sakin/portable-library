@@ -25,6 +25,8 @@ pub struct RuntimeDto {
     pub office_available: bool,
     /// 是否有可用的盘内 PDF 阅读器。前端据此决定 PDF 卡片的主按钮文案
     pub pdf_available: bool,
+    /// 是否有可用的盘内编辑器（Notepad++）。前端据此决定 md/html 卡片的主按钮
+    pub editor_available: bool,
     pub components: Vec<Status>,
 }
 
@@ -36,6 +38,7 @@ fn snapshot(state: &AppState, force: bool) -> AppResult<RuntimeDto> {
             manifest_error: state.manifest_error.clone(),
             office_available: false,
             pdf_available: false,
+            editor_available: false,
             components: Vec::new(),
         });
     };
@@ -52,6 +55,9 @@ fn snapshot(state: &AppState, force: bool) -> AppResult<RuntimeDto> {
     let pdf_available = components
         .iter()
         .any(|c| c.kind == Kind::Pdf.as_str() && c.runnable);
+    let editor_available = components
+        .iter()
+        .any(|c| c.kind == Kind::Editor.as_str() && c.runnable);
 
     Ok(RuntimeDto {
         runtime_dir: to_slash(&state.root.runtime_dir()),
@@ -59,6 +65,7 @@ fn snapshot(state: &AppState, force: bool) -> AppResult<RuntimeDto> {
         manifest_error: state.manifest_error.clone(),
         office_available,
         pdf_available,
+        editor_available,
         components,
     })
 }

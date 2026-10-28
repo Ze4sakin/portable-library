@@ -37,6 +37,14 @@
       "exe": "pdf/SumatraPDF.exe",
       "version_args": [],
       "note": "SumatraPDF 64 位便携版（单文件、无需安装）。本系统用 -appdata 把设置与缩略图缓存钉在 .library/state/pdf，不写宿主 %APPDATA%；许可证与来源见 runtime/pdf/NOTICE.md。version_args 故意留空：SumatraPDF 没有 --version，用 -list-printers 之类的副作用参数探测不值得，改为「文件存在即可用」。"
+    },
+    {
+      "id": "notepadpp",
+      "kind": "editor",
+      "version": "8.9.8.1",
+      "exe": "Notepad++/notepad++.exe",
+      "version_args": [],
+      "note": "Notepad++ 便携版（minimalist 包解压即用）+ PreviewHTML 插件。配置隔离不靠命令行参数：8.x 没有 -settingsDir，只能靠 exe 同目录的 doLocalConf.xml 标记，配置因此写在 runtime/Notepad++/ 内（config.xml、session.xml、langs.xml、stylers.xml），这些生成文件已进 .gitignore，但 doLocalConf.xml 必须随盘，删了就会静默退回宿主 %APPDATA%\\Notepad++。启动参数见 src-tauri/src/runtime/notepadpp.rs：-multiInst 防止文件被宿主那份实例接走，-nosession 防止加载绝对路径会话。version_args 留空同 pdf：N++ 无静默版本输出，改为「文件存在即可用」。许可证见 runtime/Notepad++/NOTICE.md（GPLv3）。"
     }
   ]
 }

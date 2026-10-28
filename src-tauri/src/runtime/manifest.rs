@@ -35,6 +35,13 @@ pub enum Kind {
     /// 只需要渲染。用 LibreOffice 开 PDF 也能开，但那等于把排版引擎当图片
     /// 查看器使唤 —— 慢、且会抢走文本选择与链接。
     Pdf,
+    /// 文本编辑器（Notepad++ 一类），接管 `.md` / `.html` 的查看与编辑。
+    ///
+    /// 为什么不归到 `Tool`：`tool` 是「随便放几个互不相干的命令」，界面上没有
+    /// 任何位置需要知道它们；而编辑器是**一个有唯一答案的角色**——用户点
+    /// 「用盘内编辑器打开」时，系统必须知道该给谁。把它做成单例种类，
+    /// 这份歧义就被 `validate()` 挡在启动之前，而不是留到点击那一下。
+    Editor,
     Tool,
 }
 
@@ -45,6 +52,7 @@ impl Kind {
             Kind::Node => "node",
             Kind::Office => "office",
             Kind::Pdf => "pdf",
+            Kind::Editor => "editor",
             Kind::Tool => "tool",
         }
     }
@@ -64,7 +72,10 @@ impl Kind {
     /// 允许两个就得在点击处加一个下拉选择 —— 为一个一次性选型问题，
     /// 在每次打开时都收一次税，不划算。
     pub fn singleton(self) -> bool {
-        matches!(self, Kind::Python | Kind::Node | Kind::Office | Kind::Pdf)
+        matches!(
+            self,
+            Kind::Python | Kind::Node | Kind::Office | Kind::Pdf | Kind::Editor
+        )
     }
 }
 
@@ -299,6 +310,30 @@ mod tests {
     }
 
     #[test]
+    fn rejects_two_editors() {
+        // 「用盘内编辑器打开」这句话默认了唯一性。两个编辑器就得在每次点击时
+        // 问一次「用哪个」，等于为一个一次性选型问题反复收税 —— 与 PDF 同理。
+        let mut a = comp("notepadpp", "Notepad++/notepad++.exe");
+        a.kind = Kind::Editor;
+        let mut b = comp("vscode", "vscode/Code.exe");
+        b.kind = Kind::Editor;
+        assert!(
+            manifest_of(vec![a, b]).validate().is_err(),
+            "两个编辑器应被拒绝"
+        );
+    }
+
+    #[test]
+    fn editor_is_not_a_tool() {
+        // 这条守的是「归类」：编辑器一旦被写成 tool，就逃掉了单例约束，
+        // 界面上也不再有「盘内编辑器」这个明确答案。
+        let mut c = comp("notepadpp", "Notepad++/notepad++.exe");
+        c.kind = Kind::Editor;
+        assert!(c.kind.singleton());
+        assert_ne!(Kind::Editor.as_str(), Kind::Tool.as_str());
+    }
+
+    #[test]
     fn repo_manifest_matches_this_build() {
         // 仓库里那份清单本身是交付物：`Kind` 改了名而清单没同步，表现是
         // 「发出去的盘启动即报清单有误」。这条测试把它挡在提交之前。
@@ -309,6 +344,10 @@ mod tests {
         let m: Manifest = serde_json::from_str(&text).expect("runtime/manifest.json 解析失败");
         m.validate().expect("runtime/manifest.json 校验失败");
         assert!(m.get(Kind::Pdf).is_some(), "清单里应声明 pdf 组件");
+        assert!(
+            m.get(Kind::Editor).is_some(),
+            "清单里应声明 editor 组件（Notepad++）"
+        );
     }
 
     #[test]

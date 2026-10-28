@@ -27,6 +27,8 @@
 - 便携 LibreOffice：接管 Office 文档编辑、无头转 PDF，配置用 `-env:UserInstallation` 钉在盘内
 - 便携 PDF 阅读器（SumatraPDF）：PDF / XPS / EPUB 等固定版式文档直接看，
   设置与阅读位置用 `-appdata` 钉在盘内；转出来的 PDF 也走同一个阅读器
+- 便携编辑器（Notepad++ + PreviewHTML 插件）：`.md` / `.html` 交给它改，
+  渲染效果在插件面板里看；靠 `doLocalConf.xml` 便携、`-multiInst` 防止被宿主那份实例接走
 - 代码项目自动识别（marker 文件），在项目目录开终端，环境已就绪
 
 ---
@@ -86,13 +88,21 @@ X:\
 │  ├─ python\              #   python-build-standalone 3.15（可重定位）
 │  ├─ node\                #   解压 node-v22-win-x64.zip
 │  ├─ office\              #   LibreOffice 便携版
-│  └─ pdf\                 #   SumatraPDF（单文件）+ NOTICE.md + AGPL 许可证
+│  ├─ pdf\                 #   SumatraPDF（单文件）+ NOTICE.md + AGPL 许可证
+│  └─ Notepad++\           #   Notepad++ + PreviewHTML 插件（例外：会被写配置，见下）
 └─ .library\               # 系统区（可重建）
    ├─ catalog.db           #   索引库
    ├─ cache\pdf\           #   转换产物
    ├─ state\<组件>\        #   组件私有状态（LibreOffice profile、SumatraPDF 设置、webview2 数据）
    └─ home\                #   子进程的「假 HOME」
 ```
+
+> `runtime\Notepad++\` 是「只读资产」这条规矩的唯一例外：Notepad++ 的便携模式
+> 靠 exe 同目录的 `doLocalConf.xml` 标记，配置只能写在它旁边，
+> 没有命令行开关可以外移。所以 `config.xml`、`session.xml`、`langs.xml`、
+> `stylers.xml`、`plugins\Config\PreviewHTML\` 都是它**生成**的，
+> 已在 `.gitignore` 里排除；但 `doLocalConf.xml` 必须随盘，
+> 删了它程序会静默退回宿主 `%APPDATA%`。
 
 三个分区的边界是硬约束：
 
@@ -114,6 +124,7 @@ X:\
 | Node.js | `node-v22-win-x64.zip`（官方 zip 版） | `runtime\node\` |
 | LibreOffice | LibreOffice Portable 或官方解压版 | `runtime\office\` |
 | PDF 阅读器 | SumatraPDF 3.6.1 的 `SumatraPDF-3.6.1-64.zip`（见下方校验值） | `runtime\pdf\`，解压出的 exe **改名为 `SumatraPDF.exe`** |
+| 编辑器 | Notepad++ 8.9.8.1 便携包（`npp.*.portable.zip`）+ PreviewHTML 插件 1.4.6.0 | `runtime\Notepad++\`（解压后应为 `runtime\Notepad++\notepad++.exe`） |
 
 放好之后启动（或点右侧「重新探测」），组件状态即变绿。**不需要改代码，也不需要跑步进。**
 
@@ -190,7 +201,8 @@ portable-library/
       │  ├─ launch.rs        # spawn + 超时 + 输出上限
       │  ├─ probe.rs         # 组件探测（可丢弃快照）
       │  ├─ office.rs        # LibreOffice 参数与转换
-      │  └─ pdf.rs           # SumatraPDF 参数（`-appdata` 隔离）
+      │  ├─ pdf.rs           # SumatraPDF 参数（`-appdata` 隔离）
+      │  └─ notepadpp.rs     # Notepad++ 参数（`-multiInst -nosession`）
       ├─ webview2.rs         # 宿主运行时检测 + 缺失提示（启动最前面）
       ├─ open/registry.rs    # 打开器 trait + 注册表
       ├─ commands/{library,open,runtime,project}.rs
@@ -225,11 +237,12 @@ portable-library/
 | 项 | 结果 |
 |---|---|
 | `cargo check` / `cargo clippy` / `cargo fmt --check` | ✅ 零错误、零警告、无格式差异 |
-| `cargo test` | ✅ 37 个全绿（含「增量 ≡ 全量」收敛测试、打开器路由测试） |
-| `tsc --noEmit` / `vite build` | ✅ 零错误；27.01 kB JS + 10.69 kB CSS（16 个模块） |
+| `cargo test` | ✅ 45 个全绿（含「增量 ≡ 全量」收敛测试、打开器路由测试） |
+| `tsc --noEmit` / `vite build` | ✅ 零错误；27.55 kB JS + 10.69 kB CSS（16 个模块） |
 | `npm run tauri build` | ✅ 产出带内嵌前端的 exe |
 | 真实窗口 | ✅ 发行版 exe 启动后窗口句柄非零、标题正确，`.library/state/webview2` 自动生成 |
 | PDF 链路 | ✅ 盘内 SumatraPDF 打开测试 PDF 成功；设置写在 `.library/state/pdf`，宿主 `%APPDATA%` 无痕迹 |
+| 编辑器链路 | ✅ 盘内 Notepad++ 以 `-multiInst -nosession` 打开 md/html；两次启动得到两个独立进程，宿主 `%APPDATA%\Notepad++` 全程不存在 |
 | 布局核验 | ✅ 用构建产物的真实 CSS 渲染截图，逐项核对三栏布局 |
 | 监听实时性 | ✅ 进程运行中增删改文件，索引 2 s 内自动跟上 |
 

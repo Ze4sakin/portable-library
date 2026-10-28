@@ -31,6 +31,15 @@ const OFFICE_EXT = new Set([
  */
 const PDF_EXT = new Set(["pdf", "xps", "oxps", "epub", "mobi", "cbz", "chm", "djvu"]);
 
+/**
+ * 盘内编辑器（Notepad++）接管的格式。
+ *
+ * 同样必须与 `src-tauri/src/runtime/notepadpp.rs` 的 `EXTS` 一致。
+ * 这里只用于「换个按钮文案、加一句提示」，真正的路由在后端 registry ——
+ * 前端不做任何「点下去会交给谁」的判断，否则托盘后会多出一份会过期的真相。
+ */
+const EDITOR_EXT = new Set(["md", "markdown", "mdown", "mkd", "html", "htm", "xhtml", "shtml"]);
+
 type Tone = "info" | "error";
 type Crumb = { name: string; rel: string };
 
@@ -40,6 +49,7 @@ export class PreviewView {
   private onNavigate: (rel: string | null) => void;
   private officeAvailable = false;
   private pdfAvailable = false;
+  private editorAvailable = false;
 
   constructor(
     host: HTMLElement,
@@ -59,6 +69,11 @@ export class PreviewView {
   /** 同上。两个能力来自同一次探测快照，但分别注入，因为这个视图只关心各自的有无。 */
   setPdfAvailable(value: boolean): void {
     this.pdfAvailable = value;
+  }
+
+  /** 盘内编辑器是否可用。决定 md/html 的主按钮是「用盘内 Notepad++ 编辑」还是系统默认程序。 */
+  setEditorAvailable(value: boolean): void {
+    this.editorAvailable = value;
   }
 
   empty(text = "从左侧选择一个文件"): void {
@@ -162,7 +177,27 @@ export class PreviewView {
       body.append(pre);
     }
 
-    wrap.append(head, this.actions(node), body);
+    // 能否交给盘内编辑器，取决于「盘里有」×「格式归它管」两件事。
+    // 后者必须与后端 registry 的判断同源，否则会出现「文案说 Notepad++、
+    // 点下去走系统默认程序」这种最难解释的错位。
+    const editable = this.editorAvailable && EDITOR_EXT.has(ext);
+
+    wrap.append(
+      head,
+      this.actions(node, editable ? "用盘内 Notepad++ 编辑" : undefined),
+    );
+
+    if (editable) {
+      const tip = document.createElement("div");
+      tip.className = "preview-tip";
+      tip.textContent =
+        ext === "md" || ext === "markdown"
+          ? "上面是内置渲染，只读。要改内容用盘内 Notepad++；它自带 PreviewHTML 插件，能带着样式看效果 —— 打开后走「插件 → Preview HTML」。"
+          : "这里只显示源码。渲染效果由盘内 Notepad++ 的 PreviewHTML 插件提供 —— 打开后走「插件 → Preview HTML」。";
+      wrap.append(tip);
+    }
+
+    wrap.append(body);
     this.host.replaceChildren(wrap);
   }
 

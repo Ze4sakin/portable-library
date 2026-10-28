@@ -8,7 +8,7 @@
 
 export type NodeKind = "dir" | "file" | "link";
 export type OpenMode = "preview" | "edit" | "reveal" | "convert";
-export type RuntimeKind = "python" | "node" | "office" | "pdf" | "tool";
+export type RuntimeKind = "python" | "node" | "office" | "pdf" | "editor" | "tool";
 
 export interface RootInfo {
   root: string;
@@ -80,6 +80,8 @@ export interface RuntimeStatus {
   officeAvailable: boolean;
   /** 盘内 PDF 阅读器是否可用。决定 PDF 卡片主按钮的文案与提示。 */
   pdfAvailable: boolean;
+  /** 盘内编辑器（Notepad++）是否可用。决定 md/html 卡片主按钮的文案与提示。 */
+  editorAvailable: boolean;
   components: RuntimeComponent[];
 }
 

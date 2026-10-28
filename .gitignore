@@ -6,10 +6,17 @@ src-tauri/gen/
 .DS_Store
 
 # 把工程目录本身当仿真盘根时（PL_ROOT=.）会产生这些，都不入库
+content/
 .library/
 runtime/python/
 runtime/node/
 runtime/office/
+
+# Notepad++ 便携包（约 75 MB，第三方二进制）与上面三个同理：盘内资产，不入库。
+# 但 NOTICE.md 必须进库 —— 它是分发时的 GPLv3 许可证义务说明。
+# 注意用 `/*` 而不是整个目录，否则下面的 ! 例外无法生效。
+runtime/Notepad++/*
+!runtime/Notepad++/NOTICE.md
 
 # 冒烟测试用的临时盘根（scripts/watcher-smoke.py 生成）
 .smoke/

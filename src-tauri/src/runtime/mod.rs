@@ -11,6 +11,7 @@
 //! probe    ──► manifest / env / launch
 //! office   ──► manifest / env / launch   （LibreOffice 专用参数）
 //! pdf      ──► manifest / env / launch   （SumatraPDF 专用参数）
+//! notepadpp──► manifest / env / launch   （Notepad++ 专用参数）
 //! ```
 //!
 //! 两条不变量：
@@ -25,6 +26,7 @@
 pub mod env;
 pub mod launch;
 pub mod manifest;
+pub mod notepadpp;
 pub mod office;
 pub mod pdf;
 pub mod probe;

@@ -81,6 +81,7 @@ const runtime = new RuntimeView(
   (s) => {
     preview.setOfficeAvailable(s.officeAvailable);
     preview.setPdfAvailable(s.pdfAvailable);
+    preview.setEditorAvailable(s.editorAvailable);
   },
 );
 const projects = new ProjectsView(projectsHost, (p: ProjectDto) => void showProject(p));

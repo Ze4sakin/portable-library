@@ -21,6 +21,7 @@ use crate::paths::RootCtx;
 use crate::runtime::env::EnvPlan;
 use crate::runtime::launch::{self, Spec};
 use crate::runtime::manifest::{Component, Kind, Manifest};
+use crate::runtime::notepadpp;
 use crate::runtime::office;
 use crate::runtime::pdf;
 
@@ -203,6 +204,59 @@ impl Opener for PdfOpener {
     }
 }
 
+/// 盘内编辑器接管 `.md` / `.html` 的查看与编辑。
+///
+/// 它和 `PdfOpener` 的差别只有一处，但那处决定了「预览」这件事归谁：
+/// PDF 的渲染由阅读器完成，我们只要把文件递过去；而 HTML/Markdown 的渲染
+/// 由 Notepad++ 的 PreviewHTML **插件**完成，插件在进程内、没有命令行入口，
+/// 所以这里能做的最多是「把文件正确地在盘内那份编辑器里打开」——
+/// 让渲染发生的那一步必须由用户在界面里点（详见 `runtime::notepadpp`）。
+///
+/// 这不是偷懒：Notepad++ 没有「启动时执行某个插件命令」的机制，
+/// 硬凑（比如自己发窗口消息模拟点击）会把一个稳定的启动路径绑死在
+/// 某个 UI 布局上，插件一改版就断。
+pub struct NotepadOpener {
+    root: RootCtx,
+    exe: PathBuf,
+}
+
+impl NotepadOpener {
+    pub fn new(root: &RootCtx, component: &Component) -> AppResult<Self> {
+        let exe = component.exe_path(&root.runtime_dir())?;
+        Ok(Self {
+            root: root.clone(),
+            exe,
+        })
+    }
+}
+
+impl Opener for NotepadOpener {
+    fn id(&self) -> &'static str {
+        "portable-editor"
+    }
+
+    fn matches(&self, ext: Option<&str>) -> bool {
+        notepadpp::matches_ext(ext)
+    }
+
+    fn launch(&self, abs: &Path) -> AppResult<()> {
+        let bin_dir = self
+            .exe
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| self.root.runtime_dir());
+        let plan = EnvPlan::build(&self.root, &[bin_dir], &BTreeMap::new());
+        let spec = Spec {
+            program: self.exe.clone(),
+            args: notepadpp::open_args(abs),
+            cwd: self.root.root().to_path_buf(),
+            plan,
+            hide: true,
+        };
+        launch::spawn_detached(&spec)
+    }
+}
+
 pub struct OpenerRegistry {
     openers: Vec<Box<dyn Opener>>,
     reveal: RevealOpener,
@@ -235,6 +289,9 @@ impl OpenerRegistry {
         });
         registry.register_if_present(root, m, Kind::Pdf, |r, c| {
             Ok(Box::new(PdfOpener::new(r, c)?))
+        });
+        registry.register_if_present(root, m, Kind::Editor, |r, c| {
+            Ok(Box::new(NotepadOpener::new(r, c)?))
         });
 
         registry
@@ -447,6 +504,77 @@ mod tests {
         assert_eq!(
             reg.resolve(Some("pdf")).map(|o| o.id()),
             Some("system-default")
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn editor_component() -> Component {
+        Component {
+            id: "notepadpp".into(),
+            kind: Kind::Editor,
+            version: "8.9.8.1".into(),
+            // 目录名里同时有空格和大写字母，正好顺带验证路径不会被改写。
+            exe: "Notepad++/notepad++.exe".into(),
+            version_args: Vec::new(),
+            env: BTreeMap::new(),
+            note: String::new(),
+        }
+    }
+
+    #[test]
+    fn editor_routes_markdown_and_html_when_file_exists() {
+        let dir = temp_root("editor");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("runtime/Notepad++")).expect("建 runtime/Notepad++ 失败");
+        fs::write(dir.join("runtime/Notepad++/notepad++.exe"), b"stub").expect("写假 exe 失败");
+
+        let root = RootCtx::detect_in(Some(dir.clone())).expect("构造盘根失败");
+        let m = manifest_with(vec![editor_component()]);
+        let reg = OpenerRegistry::for_root(&root, Some(&m));
+
+        for ext in ["md", "markdown", "html", "htm", "xhtml"] {
+            assert_eq!(
+                reg.resolve(Some(ext)).map(|o| o.id()),
+                Some("portable-editor"),
+                "{ext} 应交给盘内编辑器"
+            );
+        }
+
+        // 关键边界：编辑器只接管「需要渲染的源文本」，不抢内置预览已经够用的格式。
+        for ext in ["txt", "json", "rs", "log"] {
+            assert_eq!(
+                reg.resolve(Some(ext)).map(|o| o.id()),
+                Some("system-default"),
+                "{ext} 不该被编辑器抢走"
+            );
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn editor_and_reader_do_not_overlap() {
+        // 两个打开器同时存在时，集合必须仍然互不重叠：pdf 归阅读器，md 归编辑器。
+        // 一旦有人往任一 EXTS 里加了对方的格式，这里会先红。
+        let dir = temp_root("both");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("runtime/Notepad++")).expect("建目录失败");
+        fs::create_dir_all(dir.join("runtime/pdf")).expect("建目录失败");
+        fs::write(dir.join("runtime/Notepad++/notepad++.exe"), b"stub").expect("写 stub 失败");
+        fs::write(dir.join("runtime/pdf/SumatraPDF.exe"), b"stub").expect("写 stub 失败");
+
+        let root = RootCtx::detect_in(Some(dir.clone())).expect("构造盘根失败");
+        let m = manifest_with(vec![pdf_component(), editor_component()]);
+        let reg = OpenerRegistry::for_root(&root, Some(&m));
+
+        assert_eq!(
+            reg.resolve(Some("pdf")).map(|o| o.id()),
+            Some("portable-pdf")
+        );
+        assert_eq!(
+            reg.resolve(Some("md")).map(|o| o.id()),
+            Some("portable-editor")
         );
 
         let _ = fs::remove_dir_all(&dir);
