@@ -264,3 +264,4 @@ npm run tauri build -- --no-bundle     # 只要 exe，不做安装包
 **例外**：`runtime/pdf/` 下的 SumatraPDF 是第三方组件，采用 **AGPLv3**，
 不在 MIT 范围内。分发本项目的副本时，该组件的许可证条款单独适用——
 `runtime/pdf/AGPL-3.0.txt` 与 `runtime/pdf/NOTICE.md` 必须随行。
+完整清单见 [THIRD-PARTY.md](./THIRD-PARTY.md)。
