@@ -256,3 +256,11 @@ npm run tauri build -- --no-bundle     # 只要 exe，不做安装包
 
 内置 PDF / 图片预览、项目启动命令、缓存清理、exFAT 上的 ACL 实测、长路径支持 ——
 详见 ARCHITECTURE.md 第十节。WebView2 数据目录外移已完成（`.library/state/webview2`）。
+
+## 许可证
+
+本项目代码采用 **MIT**，全文见 [LICENSE](./LICENSE)。
+
+**例外**：`runtime/pdf/` 下的 SumatraPDF 是第三方组件，采用 **AGPLv3**，
+不在 MIT 范围内。分发本项目的副本时，该组件的许可证条款单独适用——
+`runtime/pdf/AGPL-3.0.txt` 与 `runtime/pdf/NOTICE.md` 必须随行。

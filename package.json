@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "便携资料与项目管理系统 · P1 骨架（Tauri 2 + WebView2）",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
