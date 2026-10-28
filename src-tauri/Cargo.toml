@@ -1,0 +1,50 @@
+[package]
+name = "portable-library"
+version = "0.1.0"
+description = "便携资料与项目管理系统（P1 骨架）"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "portable_library_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# 这个 feature 决定「前端从哪来」：
+#   开  → 用编译期嵌入的 dist/（`tauri build` 会带上）
+#   关  → 连 devUrl（`tauri dev` 用，改前端热更新）
+#
+# 踩过的坑：直接 `cargo build --release` 不带这个 feature，出来的二进制
+# 仍然去连 http://localhost:1420 —— 表现是「双击 exe 只得到一个空白窗口」，
+# 而构建过程没有任何报错。发行必须用 `npm run tauri build`。
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+thiserror = "1"
+# 文件监听。只用于「产生脏路径线索」，**不作为真相** ——
+# 详见 src/watcher.rs 顶部说明。Windows 上底层是 ReadDirectoryChangesW。
+notify = "8"
+
+# 只为一件事：启动前查注册表，确认宿主装了 WebView2（发行策略 A 的失败路径）。
+# 用 windows-sys 而不是 winreg，是因为同时要用 MessageBoxW 把「缺了」这件事
+# 说出来 —— 发行版没有控制台，不弹窗等于什么都没说。
+# 版本跟着 tauri 已锁定的 0.61 走，避免在 lock 里多养一份。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

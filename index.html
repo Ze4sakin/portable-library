@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>便携资料库</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <header class="sidebar-head">
+          <h1>便携资料库</h1>
+          <button id="btn-scan" class="btn" type="button">重新扫描</button>
+        </header>
+        <div id="tree" class="tree"></div>
+      </aside>
+
+      <main class="main">
+        <!-- 中间栏在两种形状间切换：目录结构页 / 文件预览页 -->
+        <section id="content" class="content">
+          <div class="placeholder">正在读取内容区…</div>
+        </section>
+        <footer id="status" class="statusbar"></footer>
+      </main>
+
+      <aside class="rail">
+        <nav class="rail-tabs" role="tablist">
+          <button class="rail-tab is-active" type="button" data-tab="structure">结构</button>
+          <button class="rail-tab" type="button" data-tab="runtime">运行时</button>
+          <button class="rail-tab" type="button" data-tab="projects">项目</button>
+        </nav>
+        <section id="structure" class="rail-pane is-active"></section>
+        <section id="runtime" class="rail-pane"></section>
+        <section id="projects" class="rail-pane"></section>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

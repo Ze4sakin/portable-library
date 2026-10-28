@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "P1 权限集：只开放核心窗口能力，前端不持有任何文件系统权限——所有 IO 必须经 Rust 命令，便于统一做根目录校验。",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

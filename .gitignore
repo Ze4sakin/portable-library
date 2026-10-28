@@ -1,0 +1,18 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+*.log
+.DS_Store
+
+# 把工程目录本身当仿真盘根时（PL_ROOT=.）会产生这些，都不入库
+.library/
+runtime/python/
+runtime/node/
+runtime/office/
+
+# 冒烟测试用的临时盘根（scripts/watcher-smoke.py 生成）
+.smoke/
+.smoke2/
+.smoke3/
+.smoke-app.log

@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "components": [
+    {
+      "id": "python",
+      "kind": "python",
+      "version": "3.15.0",
+      "exe": "python/python.exe",
+      "version_args": ["--version"],
+      "env": {
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "note": "用 python-build-standalone 的 install_only_stripped 包（如 cpython-3.15.0+YYYYMMDD-x86_64-pc-windows-msvc-install_only_stripped.tar.gz），解压到 runtime/ 后应得到 runtime/python/python.exe。不要用官方 python-3.15-embed-amd64.zip：embed 版禁用了 site-packages、没有 pip、也没有 venv，装不了第三方库。本盘只有这一个 Python，不建 venv（venv 会写死绝对路径，换盘必坏），第三方库直接装进 runtime/python/Lib/site-packages 随盘走。"
+    },
+    {
+      "id": "node",
+      "kind": "node",
+      "version": "22",
+      "exe": "node/node.exe",
+      "version_args": ["--version"],
+      "note": "解压 node-v22-win-x64.zip 到 runtime/node/；npm 随 zip 自带，无需安装。node_modules 不随盘迁移（体积与平台相关），每台机器上 npm ci 重建。"
+    },
+    {
+      "id": "libreoffice",
+      "kind": "office",
+      "version": "24.8",
+      "exe": "office/program/soffice.exe",
+      "version_args": ["--version"],
+      "note": "LibreOffice 便携版解压到 runtime/office/；本系统用 -env:UserInstallation 把配置钉在 .library/state/libreoffice，不写宿主 %APPDATA%"
+    },
+    {
+      "id": "pdf",
+      "kind": "pdf",
+      "version": "3.6.1",
+      "exe": "pdf/SumatraPDF.exe",
+      "version_args": [],
+      "note": "SumatraPDF 64 位便携版（单文件、无需安装）。本系统用 -appdata 把设置与缩略图缓存钉在 .library/state/pdf，不写宿主 %APPDATA%；许可证与来源见 runtime/pdf/NOTICE.md。version_args 故意留空：SumatraPDF 没有 --version，用 -list-printers 之类的副作用参数探测不值得，改为「文件存在即可用」。"
+    }
+  ]
+}

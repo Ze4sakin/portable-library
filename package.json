@@ -1,0 +1,22 @@
+{
+  "name": "portable-library",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "便携资料与项目管理系统 · P1 骨架（Tauri 2 + WebView2）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}
