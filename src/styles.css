@@ -240,7 +240,39 @@ body {
 
 .preview-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+/* 渲染 / 源码 切换。跟按钮同排，靠右 —— 它改的是「看的方式」，不是操作。 */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.seg-btn {
+  padding: 3px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.seg-btn:hover {
+  color: var(--text);
+}
+
+.seg-btn.is-active {
+  color: var(--text);
+  background: var(--hover);
 }
 
 .preview-content {
@@ -253,6 +285,22 @@ body {
   border-radius: 8px;
 }
 
+/* 渲染态：内边距交给 iframe 里的文档自己决定，这里只负责撑满。 */
+.preview-content.is-render {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+
+.preview-frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: var(--panel);
+}
+
 .code-block {
   margin: 0;
   font-family: var(--mono);
@@ -261,59 +309,6 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   color: #d8d5cd;
-}
-
-.is-markdown {
-  font-size: 13.5px;
-  line-height: 1.75;
-}
-
-.is-markdown h1,
-.is-markdown h2,
-.is-markdown h3,
-.is-markdown h4 {
-  margin: 18px 0 8px;
-  font-weight: 500;
-  line-height: 1.35;
-}
-
-.is-markdown h1 {
-  font-size: 19px;
-}
-
-.is-markdown h2 {
-  font-size: 16px;
-}
-
-.is-markdown h3 {
-  font-size: 14px;
-}
-
-.is-markdown p {
-  margin: 8px 0;
-}
-
-.is-markdown ul {
-  margin: 8px 0;
-  padding-left: 20px;
-}
-
-.is-markdown li {
-  margin: 3px 0;
-}
-
-.is-markdown code {
-  padding: 1px 5px;
-  font-family: var(--mono);
-  font-size: 12px;
-  background: var(--panel-2);
-  border-radius: 4px;
-}
-
-.is-markdown pre.code-block {
-  padding: 10px 12px;
-  background: var(--bg);
-  border-radius: 6px;
 }
 
 /* ---------- 状态栏 ---------- */

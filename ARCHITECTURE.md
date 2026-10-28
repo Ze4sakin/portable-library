@@ -134,7 +134,7 @@ pdf.js 内置预览（PDF 走盘内阅读器外开）、项目级启动配置（
 | `views/tree.ts` | 懒加载文件树；`refresh()` 原地重建并保留展开态，`reveal()` 逐级定位 |
 | `views/dirview.ts` | **目录结构页**：面包屑 + 规模统计 + 子目录分支（带规模条）+ 本级文件 |
 | `views/structure.ts` | 右栏**分类全景**：根层各分支的规模与占比，并高亮当前所在支 |
-| `views/preview.ts` | 文本 / Markdown 渲染（带位置链）；PDF 走盘内阅读器；Office 格式给「转 PDF」入口；项目卡片 |
+| `views/preview.ts` | 文本预览：md / html **渲染**（沙箱 iframe）与**源码**可切换；PDF 走盘内阅读器；Office 给「转 PDF」入口；项目卡片 |
 | `views/runtime.ts` | 运行时面板：组件状态、重新探测；探完把「office/pdf 是否可用」回灌给预览视图 |
 | `views/projects.ts` | 项目列表：语言徽标、运行时就绪指示 |
 | `views/statusbar.ts` | 只读展示；含实时同步状态 |
@@ -144,7 +144,7 @@ pdf.js 内置预览（PDF 走盘内阅读器外开）、项目级启动配置（
 
 ## 四、关键接口
 
-### 4.1 对前端暴露的命令（P3 全量 14 个）
+### 4.1 对前端暴露的命令（P3 全量 15 个）
 
 | 命令 | 入参 | 出参 | 说明 |
 |---|---|---|---|
@@ -157,6 +157,7 @@ pdf.js 内置预览（PDF 走盘内阅读器外开）、项目级启动配置（
 | `open_target` | `rel: string, mode: OpenMode` | `OpenResult` | 内容区动作模型入口 |
 | `open_cached` | `rel: string` | `OpenResult` | 打开缓存区派生物（转换出的 PDF） |
 | `read_text` | `rel: string, maxBytes?: number` | `TextPreview` | 文本预览，硬上限 2 MB |
+| `preview_base` | `rel: string` | `string` | 内置渲染的基准目录（绝对路径），供 iframe 的 `<base>` 使用 |
 | `runtime_status` | — | `RuntimeStatus` | 组件状态（读缓存，不重新探测） |
 | `runtime_probe` | — | `RuntimeStatus` | 强制重新探测 |
 | `doc_convert` | `rel: string` | `ConvertResult` | Office → PDF（无头 LibreOffice） |
@@ -318,7 +319,41 @@ open_target(rel, mode)
 不存在就自动回落到系统关联，这样「组件没装」表现为「用宿主的程序打开」，
 而不是一个没人看得懂的启动失败。
 
-### 5.4 运行流（P2 新增）
+### 5.4 预览流（内置渲染）
+
+```
+点击文件 → preview.show(node)
+  ├─ 扩展名不在 TEXT_EXT ──► 操作卡片（PDF / Office / 系统程序）
+  └─ 文本类
+       ├─ read_text(rel)     → 正文（上限 256 KB，超了截断并提示）
+       └─ preview_base(rel)  → 所在目录的绝对路径（只有 md / html 才取）
+       ▼
+     前端组装
+       ├─ md   → markdown-it 渲染 → 套上内联排版样式
+       ├─ html → 原样，只在 <head> 后插一行 <base>
+       └─ 其余 → 原样源码
+       ▼
+     <iframe sandbox="" srcdoc=…>
+       └─ 相对资源（css / 图片）→ http://asset.localhost/<盘内目录>/
+```
+
+三条必须一起成立的约束，缺一条就只剩「没有样式的裸 HTML」：
+
+1. **`asset` 协议要放行盘根下的 `content/`** —— 在 `setup` 里运行时给
+   （`allow_directory`），因为盘符会漂，写进 `tauri.conf.json` 就会在换盘后失效。
+2. **`<base href>` 必须指向「文件所在目录」的 asset URL，且末尾有 `/`** ——
+   `convertFileSrc` 把整条路径编码成**一个** path segment（`\` → `%5C`），
+   末尾不带斜杠时，URL 解析会把最后一段当文件名替换掉，目录就丢了。
+3. **`<base>` 必须插在 `head` 之后** —— 它只影响其后出现的相对 URL。
+
+沙箱用**空 sandbox**：不执行脚本、不提交表单、不做顶层跳转。盘里的 HTML 是用户内容，
+不是本程序的代码——「看」不需要「跑」。要交互效果的，走外部程序。
+
+为什么不自己起一个本地 HTTP 服务：多一个监听端口、多一套 MIME / Range / 路径穿越防护
+要自己写，而 `asset` 协议这三件事 Tauri 已经做完了（含 Range）。代价是 webview 因此
+能读 `content/` 下的任何文件——对「预览自己的文档」这件事，正是想要的边界。
+
+### 5.5 运行流（P2 新增）
 
 ```
 启动期（setup）
@@ -351,7 +386,7 @@ open_target(rel, mode)
 为什么转换结果放在 `.library/cache/pdf/<源路径哈希>/`：平铺会撞名，
 `a/report.docx` 和 `b/report.docx` 转出来的 PDF 会互相覆盖，而覆盖是**静默**的错误。
 
-### 5.5 同步流（P3 新增）
+### 5.6 同步流（P3 新增）
 
 ```
 后端线程（pl-watch）
@@ -709,9 +744,10 @@ A 的唯一代价是「宿主没装怎么办」，而这个代价必须付在**�
 `-multiInst` 强制起新进程，把「一定是本盘这一份」变成结构保证。代价是每点一次多一个
 窗口而不是一个标签页；这里选隔离。
 
-**为什么预览必须由用户点一下**：渲染由 PreviewHTML 完成，而它是**进程内插件**，
-Notepad++ 没有「启动时执行某个插件命令」的机制。硬凑（自己发窗口消息模拟点击）会把
-一个稳定的启动路径绑死在某个 UI 布局上，插件一改版就断。所以系统的职责止于
+**编辑时的预览，为什么必须由用户点一下**：这是 Notepad++ 那条路的能力，不是本程序预览的前提。
+本程序自己就能渲染（见 5.4），PreviewHTML 的价值在于「边改边看」。而它是**进程内插件**，
+Notepad++ 没有「启动时执行某个插件命令」的机制；硬凑（自己发窗口消息模拟点击）会把
+一个稳定的启动路径绑死在某个 UI 布局上，插件一改版就断。所以系统在这一侧的职责止于
 「把文件正确地在盘内那份编辑器里打开」，渲染那一步走 `插件 → Preview HTML`
 （可在 `设置 → 快捷键 → 插件命令` 里绑定键位）。
 
@@ -752,8 +788,9 @@ Notepad++ 没有「启动时执行某个插件命令」的机制。硬凑（自�
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| pdf.js 内置预览 | **未做** | 需要 asset 协议或字节流命令；当前 PDF 走**盘内阅读器**（SumatraPDF）外开，不依赖宿主装没装阅读器 |
-| 图片预览 | **未做** | 同上 |
+| pdf.js 内置预览 | **未做** | `asset` 协议已启用（HTML / Markdown 渲染在用），接 pdf.js 只差一个前端分支；当前 PDF 仍走**盘内阅读器**（SumatraPDF）外开，不依赖宿主装没装阅读器 |
+| 图片预览 | **未做** | 同上。图片现在由 md / html 渲染间接显示（相对路径已能加载），单独点开一张图仍交给外部程序 |
+| PreviewHTML 缓存 | 已知 | `runtime/Notepad++/plugins/Config/PreviewHTML/WebView2Cache/` 只增不减。它落在「只读资产区」，清理需要显式动作；量级远小于 WebView2 主数据目录 |
 | 索引内存峰值 | 已知上限 | **全量**对账仍把 `rel_path → (id, hash)` 全载入内存，约 300k 节点 30 MB 量级。日常改文件只走增量，不再付这份代价；但全量仍是首次建索引与兜底手段 |
 | WebView2 用户数据目录 | **已外移** | `data_directory()` → `.library/state/webview2`。窗口因此改由代码创建，见 8.7 |
 | PDF 批注 / 表单填写 | 未做 | 阅读器是「只读展示」定位。批注要写回用户文件，属编辑语义，当前不给入口 —— 需要时应当走「显式编辑模式」，而不是让双击顺手改文件 |
@@ -773,11 +810,11 @@ Notepad++ 没有「启动时执行某个插件命令」的机制。硬凑（自�
 | 侧 | 状态 | 说明 |
 |---|---|---|
 | Rust 编译 | ✅ 通过 | `cargo check` / `cargo clippy` 零错误零警告；`npm run tauri build --no-bundle` 产出带内嵌前端的 exe |
-| Rust 测试 | ✅ 通过 | **37 个**测试全绿（单测 + 监听 + 结构 + 2 个端到端链路 + 2 个打开器路由） |
+| Rust 测试 | ✅ 通过 | **46 个**测试全绿（单测 + 监听 + 结构 + 2 个端到端链路 + 2 个打开器路由 + 渲染基准目录） |
 | Clippy | ✅ 通过 | 零警告 |
 | 格式 | ✅ 通过 | `cargo fmt --check` 无差异 |
 | TypeScript | ✅ 通过 | `tsc --noEmit` 零错误（`strict` + `noUncheckedIndexedAccess`） |
-| 前端构建 | ✅ 通过 | `vite build` 产出 27.01 kB JS + 10.69 kB CSS（16 个模块） |
+| 前端构建 | ✅ 通过 | `vite build` 产出 130.6 kB JS + 10.7 kB CSS（35 个模块）。JS 变大的那 100 kB 是 markdown-it —— 手写渲染器撑不起表格 / 脚注这些真文档里常见的东西 |
 | 配置 JSON | ✅ 通过 | `tauri.conf.json` / `capabilities/default.json` / `runtime/manifest.json` |
 | 图标资源 | ✅ 通过 | `icons/icon.ico`，16/32/48/256 四尺寸，头部已校验 |
 | 启动冒烟 | ✅ 通过 | 带 `PL_ROOT` 启动，正确创建 `content/`、`runtime/`、`.library/catalog.db`，常驻不崩 |
@@ -785,17 +822,27 @@ Notepad++ 没有「启动时执行某个插件命令」的机制。硬凑（自�
 | PDF 链路 | ✅ 通过 | 用盘内 SumatraPDF 打开测试 PDF：日志显示 `LoadSettings('…\.library\state\pdf\SumatraPDF-settings.txt')`、1 页渲染完成；进程存活到被主动结束；宿主 `%APPDATA%\SumatraPDF` 自始至终不存在 —— `-appdata` 隔离成立 |
 | 布局核验 | ✅ 通过 | 用真实构建产物的 CSS + 等结构 DOM，经系统 Edge 无头渲染截图，逐项核对三栏宽度、面包屑/统计/分支/文件列表的排列、规模条比例、右栏页签、状态栏无裁切 |
 | 监听实时性 | ✅ 通过 | 见下方「监听冒烟」：应用运行中新建/改写/删除/重命名，索引在 0.5~0.8 s 内自动跟上 |
+| 内置渲染 | ✅ 通过 | CDP 截图：md 的表格 / 代码块 / 引用 / 图片、html 的外部 CSS 与图片都按预期呈现；iframe `securityOrigin` 为不透明源，沙箱里的脚本确实没执行（探针文本停在初始值） |
 
-**一处诚实的缺口**：真实 Tauri 窗口里的界面渲染仍没有截图证据。自动截窗被本机安全策略挡住
-（`Add-Type` 被拒）；改走 headless 浏览器时又发现**该环境不执行外部 module 脚本**
-（最小复现验证过：内联 module 能跑，同页面引用外部 `.js` 却不执行）。
+**真实窗口的截图证据**（本轮补上了）：自动截窗被本机安全策略挡住（`Add-Type` 被拒），
+headless 浏览器又不执行外部 module 脚本。最后走的是 **WebView2 的远程调试口**：
 
-所以布局核验换了条路：**用构建产物里真实的 CSS，配一份同样 class 结构的静态 DOM**，
-渲染出来看几何关系。这能查出溢出、错位、比例失真，但**查不出 JS 逻辑的界面错误** ——
-后者由 `tsc` 的类型检查与后端接口契约兜底。
+```bash
+WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9333" \
+PL_ROOT=F:/Work_space/portable-library ./portable-library.exe
+node scripts/cdp-smoke.mjs /tmp/smoke      # 点目录 → 点文件 → Page.captureScreenshot
+```
 
-结论：**视觉效果已验证到布局层，交互逻辑未经机器验证，需要人工开一眼确认**。
-这类「工具测不了」的项，如实标出来比假装通过更有用。
+这条路的额外收益是能顺手把 iframe 的隔离**量出来**而不是相信它：`Page.getFrameTree`
+里子 frame 的 `securityOrigin` 是 `://`（不透明源），父页面 `contentDocument === null`。
+而 iframe 内部的 DOM 只能通过 `Page.createIsolatedWorld(frameId)` 才查得到。
+
+它当场抓到过一个真 bug：`preview_base` 一开始用 `resolve()`，Windows 上返回
+`\\?\F:\…`，拼进 `<base href>` 后样式与图片**静默 404** —— 截图里就是「没有样式的裸 HTML」。
+现在有用例守着（`paths::tests::dir_of_has_no_verbatim_prefix`）。
+
+结论：**布局与内置渲染都已按真实窗口截图核对；双击打开、切换模式这类会起进程/改状态的
+交互仍靠人工过一眼**。这类「工具测一半」的项，如实标出来比假装通过更有用。
 
 
 编译验证过程本身值得记一笔：第一次 `cargo check` 只报了 **2 个错误，都在同一处** ——

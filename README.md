@@ -17,8 +17,10 @@
 - 启动即定位盘根，读取卷序列号（认盘不认盘符）
 - 扫描 `content/` 并建立索引，重复扫描只写变化部分
 - 懒加载文件树：一次只取一层，几十万文件也不卡
-- 内置预览：纯文本 / 代码 / Markdown
-- 其他格式一键交给外部程序打开，或在资源管理器中定位
+- 内置预览：纯文本 / 代码 / Markdown / HTML
+  - Markdown 与 HTML **默认渲染**（沙箱 iframe），可一键切「源码」
+  - 渲染会加载同目录的 css 与图片；脚本一律不执行
+- 单击预览、双击交给外部程序；其他格式一键打开或在资源管理器中定位
 
 **运行时侧（P2）**
 
@@ -28,7 +30,8 @@
 - 便携 PDF 阅读器（SumatraPDF）：PDF / XPS / EPUB 等固定版式文档直接看，
   设置与阅读位置用 `-appdata` 钉在盘内；转出来的 PDF 也走同一个阅读器
 - 便携编辑器（Notepad++ + PreviewHTML 插件）：`.md` / `.html` 交给它改，
-  渲染效果在插件面板里看；靠 `doLocalConf.xml` 便携、`-multiInst` 防止被宿主那份实例接走
+  靠 `doLocalConf.xml` 便携、`-multiInst` 防止被宿主那份实例接走；
+  预览不必进编辑器（本程序自己渲染），插件用于「边改边看」
 - 代码项目自动识别（marker 文件），在项目目录开终端，环境已就绪
 
 ---
@@ -222,6 +225,7 @@ portable-library/
 | `open_target` | 内容区打开：`preview` / `edit` / `reveal` |
 | `open_cached` | 打开缓存区派生物（转换出的 PDF） |
 | `read_text` | 文本预览，硬上限 2 MB |
+| `preview_base` | 内置渲染的基准目录（绝对路径），iframe 的 `<base>` 用 |
 | `runtime_status` | 组件状态（读缓存） |
 | `runtime_probe` | 强制重新探测 |
 | `doc_convert` | Office → PDF（无头 LibreOffice） |

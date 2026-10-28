@@ -137,6 +137,23 @@ impl RootCtx {
         }
     }
 
+    /// 文件所在目录。
+    ///
+    /// **刻意不走 `resolve()`**：后者对已存在的路径做 `canonicalize`，Windows 上
+    /// 会带上 verbatim 前缀（`\\?\F:\…`）。这个值一旦拼进 `http://asset.localhost/…`
+    /// 就失效（asset 协议不认 verbatim），而失败方式是**静默 404** ——
+    /// 界面表现只是「样式和图片都没了」，最难查的一类 bug。
+    ///
+    /// 越界防线没有因此削弱：`sanitize_rel` 仍然拒 `..`、绝对路径、盘符与数据流，
+    /// 结果必然落在 `content/` 之下；而 asset 协议的作用域也只放行 `content/`。
+    pub fn dir_of(&self, rel: &str) -> AppResult<PathBuf> {
+        let joined = self.content.join(sanitize_rel(rel)?);
+        Ok(match joined.parent() {
+            Some(dir) => dir.to_path_buf(),
+            None => self.content.clone(),
+        })
+    }
+
     /// 绝对路径 → 相对路径（统一 `/` 分隔）。
     ///
     /// 当前无调用方，但保留：这是 `resolve()` 的严格逆运算，也是「把盘外
@@ -281,6 +298,26 @@ mod tests {
             to_slash(&sanitize_rel("中文 目录/x.docx").unwrap()),
             "中文 目录/x.docx"
         );
+    }
+
+    #[test]
+    fn dir_of_has_no_verbatim_prefix() {
+        // 这条测试守的是一个曾经真踩到的坑：`dir_of` 若改回 `resolve()`，
+        // Windows 上会带 `\\?\` 前缀，前端拼出的 `<base href>` 让样式与图片
+        // 全部静默 404 —— 界面只表现为「没有样式的裸 HTML」。
+        let root = std::env::temp_dir().join(format!("pl-dir-of-{}", std::process::id()));
+        let ctx = RootCtx::detect_in(Some(root)).expect("构造盘根");
+
+        let dir = to_slash(&ctx.dir_of("a/b/c.md").expect("取目录"));
+        assert!(
+            dir.starts_with(&to_slash(ctx.content())),
+            "越出内容区：{dir}"
+        );
+        assert!(dir.ends_with("/a/b"), "目录层级不对：{dir}");
+        assert!(!dir.contains("//?"), "带了 verbatim 前缀：{dir}");
+
+        assert!(ctx.dir_of("../x").is_err());
+        assert!(ctx.dir_of("C:/Windows/x.md").is_err());
     }
 
     #[test]

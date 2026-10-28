@@ -10,7 +10,7 @@
  * 3. 将来换 IPC 机制（或做 Web 版 mock）只需替换本文件
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
@@ -58,6 +58,23 @@ export const api = {
 
   readText: (rel: string, maxBytes?: number) =>
     call<TextPreview>("read_text", { rel, maxBytes: maxBytes ?? null }),
+
+  /**
+   * 内置渲染的基准目录（绝对路径）。
+   *
+   * 只有「要渲染的文档」需要它：iframe 里的 `<base href>` 指到这个目录，
+   * 文档中 `./style.css`、`img/a.png` 才会落回盘里。取不到不是错误 ——
+   * 没有相对资源的文档（纯内联样式）照样能看。
+   */
+  previewBase: (rel: string) => call<string>("preview_base", { rel }),
+
+  /**
+   * 盘内绝对路径 → asset 协议 URL。
+   *
+   * 包一层而不是让视图直接 import `@tauri-apps/api`：这条 IPC/协议相关的
+   * 知识只应该存在于本文件（见文件头）。
+   */
+  assetUrl: (absPath: string) => convertFileSrc(absPath),
 
   runtimeStatus: () => call<RuntimeStatus>("runtime_status"),
 

@@ -13,7 +13,8 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.1.1"
+    "@tauri-apps/api": "^2.1.1",
+    "markdown-it": "^15.0.3"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0",

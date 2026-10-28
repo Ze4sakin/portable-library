@@ -19,6 +19,13 @@ export interface DirViewHandlers {
   onEnter: (rel: string | null) => void;
   /** 打开一个文件（切到预览） */
   onOpen: (node: NodeDto) => void;
+  /**
+   * 双击文件：交给盘内编辑器（缺失时系统默认程序）打开。
+   *
+   * 和 `onOpen` 分开是因为这两件事的「代价」不同：单击是零风险的本地渲染，
+   * 双击会**离开本程序**、起一个进程。混成一个 handler 就只能靠猜用户意图。
+   */
+  onOpenExternal: (node: NodeDto) => void;
   /** 在资源管理器中定位 */
   onReveal: (rel: string) => void;
 }
@@ -223,6 +230,10 @@ export class DirectoryView {
 
       btn.append(mark, name, size, time);
       btn.addEventListener("click", () => this.handlers.onOpen(item.node));
+      // 双击 = 用外部程序打开（Windows 的老习惯）。单击预览已经换了右栏内容，
+      // 双击只是接着把文件交给编辑器，两者不冲突。
+      btn.title = "单击预览，双击用盘内编辑器打开";
+      btn.addEventListener("dblclick", () => this.handlers.onOpenExternal(item.node));
       list.append(btn);
     }
 

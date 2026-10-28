@@ -1,13 +1,24 @@
 /**
  * 预览视图。
  *
- * P1 的边界：文本类内容内置渲染，其余格式给出操作卡片交给外部程序。
+ * 文本类内容分两种看法，由用户当场选：
+ *   - **预览**：md 走 markdown-it 渲染、html 按盘内原样渲染，都装在沙箱 iframe 里
+ *   - **源码**：原文照抄，方便复制
+ *
+ * 为什么渲染一定要 iframe：文档里的相对路径（同目录的 css、图片）需要一个
+ * 「以盘内目录为基准」的 URL 才能加载，而 `srcdoc` 的基准是父页面。为此后端
+ * 提供 `preview_base`，前端拼成 asset 协议地址写进 `<base href>`。
+ * 沙箱里不给 `allow-scripts` —— 盘里的 HTML 是**用户内容**，不是本程序的代码：
+ * 看，不需要跑。要看交互效果的，用外部程序打开。
+ *
  * 不做的事情（留给 P2）：docx/xlsx 前端渲染、LibreOffice 精确预览、pdf.js。
  * 理由见 ARCHITECTURE.md「P1 裁剪说明」。
  */
 
+import MarkdownIt from "markdown-it";
+
 import { api } from "../api/client";
-import type { NodeDto, ProjectDto } from "../api/types";
+import type { NodeDto, ProjectDto, TextPreview } from "../api/types";
 import { formatBytes, formatTime } from "../core/format";
 
 const TEXT_EXT = new Set([
@@ -16,6 +27,20 @@ const TEXT_EXT = new Set([
   "html", "htm", "xml", "py", "sh", "bat", "ps1", "go", "java", "kt", "c", "h",
   "cpp", "hpp", "cs", "rb", "php", "sql", "gitignore",
 ]);
+
+/** 能渲染成本文之外观感的格式：md 走 markdown-it，html 按原样。 */
+const MARKDOWN_EXT = new Set(["md", "markdown", "mdown", "mkd"]);
+const HTML_EXT = new Set(["html", "htm", "xhtml", "shtml"]);
+
+/**
+ * Markdown 渲染器。
+ *
+ * `html: false` 是硬要求：md 里夹的原生 HTML 一律转义，不参与解析。
+ * 渲染结果随后被丢进 `sandbox=""` 的 iframe，两道防线是重复的 —— 但一份
+ * 来自移动盘的文档不该有任何执行机会，重复在这里不算浪费。
+ */
+const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
+
 
 /** 能交给盘内 LibreOffice 转 PDF 的格式 */
 const OFFICE_EXT = new Set([
@@ -43,6 +68,18 @@ const EDITOR_EXT = new Set(["md", "markdown", "mdown", "mkd", "html", "htm", "xh
 type Tone = "info" | "error";
 type Crumb = { name: string; rel: string };
 
+/** 已取回、正在展示的文本。切「预览 / 源码」时用它重画，不必再读盘。 */
+type ShownText = {
+  node: NodeDto;
+  content: string;
+  truncated: boolean;
+  encoding: string;
+  ext: string;
+  /** 渲染基准目录（绝对路径）。取不到时为 null，此时只看得到内联样式。 */
+  base: string | null;
+  crumbs: Crumb[];
+};
+
 export class PreviewView {
   private host: HTMLElement;
   private onNotice: (text: string, tone: Tone) => void;
@@ -50,6 +87,12 @@ export class PreviewView {
   private officeAvailable = false;
   private pdfAvailable = false;
   private editorAvailable = false;
+  /**
+   * 用户上次选的看法。跨文件保持 —— 习惯看源码的人不该每点一个文件重新切一次。
+   * 只影响 md / html，其余格式没有第二种看法。
+   */
+  private sourceMode = false;
+  private current: ShownText | null = null;
 
   constructor(
     host: HTMLElement,
@@ -96,9 +139,14 @@ export class PreviewView {
     }
 
     this.empty("读取中…");
+    const renderable = MARKDOWN_EXT.has(ext) || HTML_EXT.has(ext);
     try {
-      const preview = await api.readText(node.relPath);
-      this.showText(node, preview.content, preview.truncated, preview.encoding, crumbs);
+      const [preview, base] = await Promise.all([
+        api.readText(node.relPath),
+        // 基准目录取不到不影响「看」，不值得把整个预览打断
+        renderable ? api.previewBase(node.relPath).catch(() => null) : Promise.resolve(null),
+      ]);
+      this.showText(node, preview, ext, base, crumbs);
     } catch (err) {
       this.showError((err as Error).message);
     }
@@ -139,11 +187,42 @@ export class PreviewView {
 
   private showText(
     node: NodeDto,
-    content: string,
-    truncated: boolean,
-    encoding: string,
+    preview: TextPreview,
+    ext: string,
+    base: string | null,
     crumbs: Crumb[],
   ): void {
+    this.current = {
+      node,
+      content: preview.content,
+      truncated: preview.truncated,
+      encoding: preview.encoding,
+      ext,
+      base,
+      crumbs,
+    };
+    this.renderText();
+  }
+
+  /**
+   * 按当前「预览 / 源码」选择重画。
+   *
+   * 用 `this.current` 里缓存的正文，而不是再调一次 `readText`：切个看法
+   * 不该产生 I/O。文件真被改了，watcher 会推 `library:changed`，
+   * 上层重新 `show()` —— 那条路才读盘。
+   */
+  private renderText(): void {
+    const cur = this.current;
+    if (!cur) return;
+
+    const { node, ext, crumbs } = cur;
+    const renderable = MARKDOWN_EXT.has(ext) || HTML_EXT.has(ext);
+
+    // 能否交给盘内编辑器，取决于「盘里有」×「格式归它管」两件事。
+    // 后者必须与后端 registry 的判断同源，否则会出现「文案说 Notepad++、
+    // 点下去走系统默认程序」这种最难解释的错位。
+    const editable = this.editorAvailable && EDITOR_EXT.has(ext);
+
     const wrap = document.createElement("div");
     wrap.className = "preview-body";
 
@@ -154,54 +233,106 @@ export class PreviewView {
     head.className = "preview-head";
     head.append(
       this.field(node.name, "strong"),
-      this.field(`${formatBytes(node.size)} · ${formatTime(node.mtime)} · ${encoding}`),
+      this.field(`${formatBytes(node.size)} · ${formatTime(node.mtime)} · ${cur.encoding}`),
     );
 
-    if (truncated) {
+    if (cur.truncated) {
       const tip = document.createElement("div");
       tip.className = "preview-tip";
       tip.textContent = "文件较大，仅显示前 256 KB";
       head.append(tip);
     }
 
-    const body = document.createElement("div");
-    body.className = "preview-content";
-    const ext = (node.ext ?? "").toLowerCase();
-    if (ext === "md" || ext === "markdown") {
-      body.innerHTML = renderMarkdown(content);
-      body.classList.add("is-markdown");
-    } else {
-      const pre = document.createElement("pre");
-      pre.className = "code-block";
-      pre.textContent = content;
-      body.append(pre);
-    }
+    const bar = this.actions(node, editable ? "用盘内 Notepad++ 编辑" : undefined);
+    if (renderable) bar.append(this.modeSwitch());
 
-    // 能否交给盘内编辑器，取决于「盘里有」×「格式归它管」两件事。
-    // 后者必须与后端 registry 的判断同源，否则会出现「文案说 Notepad++、
-    // 点下去走系统默认程序」这种最难解释的错位。
-    const editable = this.editorAvailable && EDITOR_EXT.has(ext);
+    wrap.append(head, bar);
 
-    wrap.append(
-      head,
-      this.actions(node, editable ? "用盘内 Notepad++ 编辑" : undefined),
-    );
-
-    if (editable) {
+    for (const line of this.modeTips(ext, renderable, editable)) {
       const tip = document.createElement("div");
       tip.className = "preview-tip";
-      tip.textContent =
-        ext === "md" || ext === "markdown"
-          ? "上面是内置渲染，只读。要改内容用盘内 Notepad++；它自带 PreviewHTML 插件，能带着样式看效果 —— 打开后走「插件 → Preview HTML」。"
-          : "这里只显示源码。渲染效果由盘内 Notepad++ 的 PreviewHTML 插件提供 —— 打开后走「插件 → Preview HTML」。";
+      tip.textContent = line;
       wrap.append(tip);
     }
 
-    wrap.append(body);
+    wrap.append(this.contentBody(ext, cur.content, cur.base, renderable));
     this.host.replaceChildren(wrap);
   }
 
+  private modeTips(ext: string, renderable: boolean, editable: boolean): string[] {
+    const out: string[] = [];
+    if (renderable) {
+      if (this.sourceMode) {
+        out.push("源码模式。切到「预览」看渲染结果。");
+      } else if (MARKDOWN_EXT.has(ext)) {
+        out.push("内置渲染（只读）：标题、列表、表格、代码块、图片都按 Markdown 语义排版。");
+      } else {
+        out.push(
+          "按盘内原样渲染，同目录的 CSS / 图片会一起加载。为安全起见脚本不执行 —— 要看交互效果，用外部程序打开。",
+        );
+      }
+    }
+    if (editable) {
+      out.push("「用盘内 Notepad++ 编辑」改完保存，这里会跟着重画。");
+    }
+    return out;
+  }
+
+  private contentBody(
+    ext: string,
+    content: string,
+    base: string | null,
+    renderable: boolean,
+  ): HTMLElement {
+    const body = document.createElement("div");
+
+    if (renderable && !this.sourceMode) {
+      body.className = "preview-content is-render";
+      body.append(this.frame(ext, content, base));
+      return body;
+    }
+
+    body.className = "preview-content";
+    const pre = document.createElement("pre");
+    pre.className = "code-block";
+    pre.textContent = content;
+    body.append(pre);
+    return body;
+  }
+
+  private frame(ext: string, content: string, base: string | null): HTMLIFrameElement {
+    const iframe = document.createElement("iframe");
+    iframe.className = "preview-frame";
+    // 空 sandbox = 全禁：不执行脚本、不提交表单、不跳顶层。相对资源照常加载。
+    iframe.setAttribute("sandbox", "");
+    iframe.setAttribute("referrerpolicy", "no-referrer");
+    iframe.srcdoc = MARKDOWN_EXT.has(ext)
+      ? markdownDocument(md.render(content), base)
+      : htmlDocument(content, base);
+    return iframe;
+  }
+
+  private modeSwitch(): HTMLElement {
+    const seg = document.createElement("div");
+    seg.className = "seg";
+    const pick = (label: string, source: boolean) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = this.sourceMode === source ? "seg-btn is-active" : "seg-btn";
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        if (this.sourceMode === source) return;
+        this.sourceMode = source;
+        this.renderText();
+      });
+      return btn;
+    };
+    seg.append(pick("预览", false), pick("源码", true));
+    return seg;
+  }
+
   private showActionCard(node: NodeDto, crumbs: Crumb[]): void {
+    this.current = null;
     const wrap = document.createElement("div");
     wrap.className = "preview-body";
 
@@ -262,6 +393,7 @@ export class PreviewView {
    * 而终端 + 已就绪的环境，覆盖了 90% 的实际操作，且零配置。
    */
   showProject(p: ProjectDto): void {
+    this.current = null;
     const wrap = document.createElement("div");
     wrap.className = "preview-body";
 
@@ -364,78 +496,103 @@ export class PreviewView {
   }
 }
 
-function escapeHtml(src: string): string {
-  return src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function escapeAttr(src: string): string {
+  return src.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
 /**
- * 极简 Markdown 渲染。
- * 安全前提：**先整体转义，再做结构替换**，因此不会引入脚本。
- * 完整渲染（表格、脚注、任务列表）留给 P2 接 markdown-it。
+ * `<base href>` —— 渲染保真的关键一行。
+ *
+ * `convertFileSrc` 把整条路径塞进**一个** path segment（`\` → `%5C`），
+ * 所以取自它的 URL 末尾没有 `/`。按 URL 解析规则，「不以斜杠结尾的路径」
+ * 最后一段会被相对引用**整个替换掉**（`...%5Cdocs` + `a.png` → `.../a.png`），
+ * 目录就此丢掉。补一个 `/` 让基准退回目录层，解码后是 `F:/盘/目录/a.png` ——
+ * Windows 的文件 API 认混合分隔符，asset 协议这一侧照常打开。
  */
-function renderMarkdown(src: string): string {
-  const lines = escapeHtml(src).split(/\r?\n/);
-  const out: string[] = [];
-  let inCode = false;
-  let inList = false;
+function baseTag(base: string | null): string {
+  if (!base) return "";
+  return `<base href="${escapeAttr(`${api.assetUrl(base)}/`)}">`;
+}
 
-  const closeList = () => {
-    if (inList) {
-      out.push("</ul>");
-      inList = false;
-    }
-  };
+/** md 渲染结果 → 完整文档。样式内联，跟应用同一套暗色变量（iframe 里没有父页面样式）。 */
+function markdownDocument(html: string, base: string | null): string {
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">${baseTag(base)}<style>${DOC_CSS}</style></head><body class="doc">${html}</body></html>`;
+}
 
-  for (const line of lines) {
-    if (line.startsWith("```")) {
-      closeList();
-      if (inCode) {
-        out.push("</code></pre>");
-        inCode = false;
-      } else {
-        out.push('<pre class="code-block"><code>');
-        inCode = true;
-      }
-      continue;
-    }
+/**
+ * 盘里的 HTML → 可渲染文档，只做一件事：插入 `<base>`。
+ *
+ * 必须插在 `<head>` 之后：`<base>` 只影响**它之后**出现的相对 URL，
+ * 插在末尾等于没插。没有 `<head>` 的（片段式 HTML）补一个骨架 —— 否则
+ * base 无处安放，CSS 与图片依旧全丢。
+ */
+function htmlDocument(src: string, base: string | null): string {
+  const tag = baseTag(base);
+  if (!tag) return src;
 
-    if (inCode) {
-      out.push(line);
-      continue;
-    }
-
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading && heading[1] !== undefined && heading[2] !== undefined) {
-      const level = heading[1].length;
-      out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
-      continue;
-    }
-
-    const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
-    if (bullet && bullet[1] !== undefined) {
-      if (!inList) {
-        out.push("<ul>");
-        inList = true;
-      }
-      out.push(`<li>${inline(bullet[1])}</li>`);
-      continue;
-    }
-
-    closeList();
-
-    if (line.trim() === "") {
-      continue;
-    }
-    out.push(`<p>${inline(line)}</p>`);
+  const head = /<head\b[^>]*>/i.exec(src);
+  if (head) {
+    const at = head.index + head[0].length;
+    return src.slice(0, at) + tag + src.slice(at);
   }
 
-  closeList();
-  if (inCode) out.push("</code></pre>");
-  return out.join("\n");
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">${tag}</head><body>${src}</body></html>`;
 }
 
-function inline(src: string): string {
-  return src
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+/**
+ * md 文档的排版样式。
+ *
+ * 不复用应用主样式：那份 CSS 是按三栏布局写的（`.preview-content` 之类），
+ * 塞进 iframe 只会带来一堆不生效的规则。这里只留「一份文档该有的样子」。
+ */
+const DOC_CSS = `
+:root { color-scheme: dark; }
+html { background: #232322; }
+body {
+  margin: 0;
+  padding: 18px 22px 48px;
+  color: #e6e4dd;
+  background: #232322;
+  font: 13.5px/1.75 "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-wrap: break-word;
 }
+h1, h2, h3, h4, h5, h6 { margin: 22px 0 10px; font-weight: 600; line-height: 1.35; }
+h1 { font-size: 21px; padding-bottom: 7px; border-bottom: 1px solid #3a3a37; }
+h2 { font-size: 17px; padding-bottom: 5px; border-bottom: 1px solid #3a3a37; }
+h3 { font-size: 15px; }
+h4, h5, h6 { font-size: 13.5px; }
+p, ul, ol, pre, table, blockquote { margin: 10px 0; }
+ul, ol { padding-left: 22px; }
+li { margin: 3px 0; }
+li > p { margin: 4px 0; }
+a { color: #5dcaa5; text-decoration: none; }
+a:hover { text-decoration: underline; }
+code {
+  padding: 1px 5px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, "Sarasa Mono SC", monospace;
+  font-size: 12.5px;
+  background: #2a2a28;
+  border-radius: 4px;
+}
+pre {
+  padding: 12px 14px;
+  overflow: auto;
+  background: #1b1b1a;
+  border: 1px solid #3a3a37;
+  border-radius: 8px;
+}
+pre code { padding: 0; background: none; font-size: 12.5px; line-height: 1.6; }
+blockquote {
+  padding: 2px 14px;
+  color: #a3a099;
+  border-left: 3px solid #1d9e75;
+}
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 6px 10px; text-align: left; vertical-align: top; border: 1px solid #3a3a37; }
+th { font-weight: 600; background: #2a2a28; }
+hr { margin: 20px 0; border: 0; border-top: 1px solid #3a3a37; }
+img { max-width: 100%; height: auto; }
+input[type="checkbox"] { margin-right: 6px; }
+`;
+

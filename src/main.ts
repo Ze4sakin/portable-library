@@ -66,6 +66,7 @@ const structure = new StructureView(structureHost, (rel) => void navigate(rel));
 const dirview = new DirectoryView(contentHost, {
   onEnter: (rel) => void navigate(rel),
   onOpen: (node) => void openFile(node),
+  onOpenExternal: (node) => void openExternal(node),
   onReveal: (rel) => void reveal(rel),
 });
 const preview = new PreviewView(
@@ -115,6 +116,22 @@ async function openFile(node: NodeDto): Promise<void> {
   await preview.show(node, pathCrumbs(node.relPath));
   void structure.load(contextDir);
   void tree.reveal(node.relPath);
+}
+
+/**
+ * 把一个文件交给外部程序（双击走这条）。
+ *
+ * 路由交给后端：盘内有 Notepad++ 时它接 md/html，没有就落回系统默认程序。
+ * 前端只负责说清楚「交给了谁」—— 不自己判断，否则会出现两套会互相过期的真相。
+ */
+async function openExternal(node: NodeDto): Promise<void> {
+  try {
+    const r = await api.openTarget(node.relPath, "edit");
+    const who = r.outcome === "external" ? (r.program ?? "外部程序") : "内置预览";
+    status.notice(`${node.name} → ${who}`, "info");
+  } catch (err) {
+    status.notice((err as Error).message, "error");
+  }
 }
 
 async function showProject(p: ProjectDto): Promise<void> {

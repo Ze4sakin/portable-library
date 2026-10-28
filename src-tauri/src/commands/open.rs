@@ -133,3 +133,17 @@ pub fn read_text(
         encoding,
     })
 }
+
+/// 内置渲染的基准目录（绝对路径，正斜杠）。
+///
+/// 前端拿它配合 `convertFileSrc` 拼出 `http://asset.localhost/<目录>/`，
+/// 写进 iframe `srcdoc` 的 `<base href>`。**这不是可选的**：只把 HTML 文本
+/// 塞进 srcdoc，文档里的 `./style.css`、`img/a.png` 会以父页面为基准解析，
+/// 打到前端资源里，结果是「样式全丢」。渲染保真靠的就是这一行 base。
+///
+/// 返回目录而不是文件，是因为 md 引用的图片常散在子目录里；`<base>` 本身
+/// 只能是一个目录。
+#[tauri::command]
+pub fn preview_base(state: State<'_, AppState>, rel: String) -> AppResult<String> {
+    Ok(crate::paths::to_slash(&state.root.dir_of(&rel)?))
+}

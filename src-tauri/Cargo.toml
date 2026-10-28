@@ -24,7 +24,13 @@ custom-protocol = ["tauri/custom-protocol"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# protocol-asset：内置 HTML 渲染走 `asset` 协议取文件。
+# 为什么不能只把 HTML 文本塞进 srcdoc：相对路径（同目录的 css/图片）会被
+# 解析到 `tauri.localhost/...`，一律 404 —— 只能看到「没有样式的裸 HTML」。
+# 开这个 feature 后，前端可以把 iframe 的 base 指向 `http://asset.localhost/<盘内目录>/`，
+# 相对资源就落回盘里。作用域**不在配置里写死**（盘符会漂），见 lib.rs 的
+# allow_directory —— 只放行盘根。
+tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }

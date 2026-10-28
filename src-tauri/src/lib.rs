@@ -80,6 +80,16 @@ pub fn run() {
 
             let registry = OpenerRegistry::for_root(&root, manifest.as_ref());
 
+            // 内置 HTML 渲染要读同目录的相对资源（css、图片、字体）。把 HTML 文本
+            // 塞进 `srcdoc` 是不够的 —— 相对路径会解析到 `tauri.localhost/...`，
+            // 一律 404，用户看到的是「没有样式的裸 HTML」。所以放行 asset 协议。
+            //
+            // 作用域**必须在这里给，不能写进 tauri.conf.json**：盘符会漂，配置是
+            // 编译期常量。只放行 `content/`（用户内容区），不放到盘根 ——
+            // `.library/` 里有数据库，没有任何理由让 iframe 读得到。
+            app.asset_protocol_scope()
+                .allow_directory(root.content(), true)?;
+
             app.manage(AppState {
                 root,
                 db: Mutex::new(conn),
@@ -112,6 +122,7 @@ pub fn run() {
             commands::open::open_target,
             commands::open::open_cached,
             commands::open::read_text,
+            commands::open::preview_base,
             commands::runtime::runtime_status,
             commands::runtime::runtime_probe,
             commands::runtime::doc_convert,
